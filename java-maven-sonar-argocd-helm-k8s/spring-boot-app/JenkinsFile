@@ -50,15 +50,17 @@ pipeline {
     stage('Build & Push Docker Image') {
       agent {
         docker {
-          image 'docker:24.0.1-dind'       // Official Docker-in-Docker image
-          args  '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
+          image 'docker:24.0.1-dind'
+          args  '--privileged -u root -v /var/run/docker.sock:/var/run/docker.sock'
         }
       }
       environment {
-        IMAGE_NAME = "airforce7/ultimate-cicd:${BUILD_NUMBER}"
+        IMAGE_NAME    = "airforce7/ultimate-cicd:${BUILD_NUMBER}"
+        DOCKER_CONFIG = '/tmp/.docker'
       }
       steps {
         sh '''
+          mkdir -p $DOCKER_CONFIG
           cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
           docker build -t ${IMAGE_NAME} .
         '''
@@ -73,8 +75,8 @@ pipeline {
     stage('Update Deployment') {
       agent any
       environment {
-        GIT_REPO   = 'java-cicd-pipeline'
-        GIT_USER   = 'shubh-swe'
+        GIT_REPO = 'java-cicd-pipeline'
+        GIT_USER = 'shubh-swe'
       }
       steps {
         withCredentials([string(credentialsId: 'github', variable: 'GIT_TOKEN')]) {
