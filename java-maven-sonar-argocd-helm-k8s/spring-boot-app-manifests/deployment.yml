@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
       - name: spring-boot-app
-        image: airforce7/ultimate-cicd:12  # ← YE CHANGE KIYA MAINE
+        image: airforce7/ultimate-cicd:replaceImageTag
         ports:
         - containerPort: 8080
