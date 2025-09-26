@@ -13,7 +13,7 @@ pipeline {
       agent {
         docker {
           image 'maven:3.8.8-eclipse-temurin-17'
-          args  '--user root -v /root/.m2:/root/.m2'
+          args  '--user root -v /root/.m2:/root/.m2 --entrypoint=""'
         }
       }
       steps {
@@ -29,7 +29,7 @@ pipeline {
       agent {
         docker {
           image 'maven:3.8.8-eclipse-temurin-17'
-          args  '--user root -v /root/.m2:/root/.m2'
+          args  '--user root -v /root/.m2:/root/.m2 --entrypoint=""'
         }
       }
       environment {
@@ -48,25 +48,20 @@ pipeline {
     }
 
     stage('Build & Push Docker Image') {
-      agent {
-        docker {
-          image 'docker:24.0.1-dind'
-          args  '--privileged -u root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
-      }
+      agent any
       environment {
-        IMAGE_NAME    = "airforce7/ultimate-cicd:${BUILD_NUMBER}"
-        DOCKER_CONFIG = '/tmp/.docker'
+        IMAGE_NAME = "airforce7/ultimate-cicd:${BUILD_NUMBER}"
+        REGISTRY_CREDENTIALS = credentials('docker-cred')
       }
       steps {
-        sh '''
-          mkdir -p $DOCKER_CONFIG
-          cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-          docker build -t ${IMAGE_NAME} .
-        '''
         script {
-          docker.withRegistry('', 'docker-cred') {
-            docker.image(IMAGE_NAME).push()
+          sh '''
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+            docker build -t ${IMAGE_NAME} .
+          '''
+          def dockerImage = docker.image("${IMAGE_NAME}")
+          docker.withRegistry('https://index.docker.io/v1/', "docker-cred") {
+            dockerImage.push()
           }
         }
       }
@@ -81,13 +76,26 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'github', variable: 'GIT_TOKEN')]) {
           sh '''
+            # Fix detached HEAD by checking out the branch
+            git checkout main || git checkout -b main
+            git pull origin main || echo "No upstream to pull from"
+            
+            # Configure git user
             git config user.name "Shubham Dwivedi"
             git config user.email "shubhamdwivedi.spacepilot@gmail.com"
+            
+            # Update deployment file
             sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" \
                 java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-            git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-            git commit -m "Update image to ${BUILD_NUMBER}"
-            git push https://${GIT_TOKEN}@github.com/${GIT_USER}/${GIT_REPO}.git HEAD:main
+            
+            # Check if there are changes to commit
+            if git diff --quiet HEAD -- java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml; then
+              echo "No changes to commit - deployment already up to date"
+            else
+              git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+              git commit -m "Update image to ${BUILD_NUMBER}"
+              git push https://${GIT_TOKEN}@github.com/${GIT_USER}/${GIT_REPO}.git HEAD:main
+            fi
           '''
         }
       }
@@ -96,16 +104,109 @@ pipeline {
 
   post {
     always {
-      cleanWs()
+      node('any') {
+        cleanWs(
+          cleanWhenNotBuilt: false,
+          deleteDirs: true,
+          disableDeferredWipeout: true,
+          notFailBuild: true
+        )
+      }
+    }
+    success {
+      node('any') {
+        script {
+          echo "✅ Pipeline completed successfully!"
+          echo "🐳 Docker Image: airforce7/ultimate-cicd:${BUILD_NUMBER}"
+          echo "🚀 Deployment updated successfully"
+          
+          try {
+            mail to: 'shubhamdwivedi.spacepilot@gmail.com',
+                 subject: "✅ Build #${BUILD_NUMBER} SUCCESS - ${JOB_NAME}",
+                 body: """
+Hi Shubham,
+
+Your CI/CD Pipeline completed successfully! 🎉
+
+📋 Build Details:
+• Job: ${JOB_NAME}
+• Build Number: ${BUILD_NUMBER}
+• Docker Image: airforce7/ultimate-cicd:${BUILD_NUMBER}
+• Build URL: ${BUILD_URL}
+
+🚀 Next Steps:
+• Your application is ready for deployment
+• Check ArgoCD for automatic sync
+• Monitor application logs
+
+Thanks,
+Jenkins CI/CD Bot
+                 """
+          } catch (Exception e) {
+            echo "📧 Mail notification failed: ${e.getMessage()}"
+          }
+        }
+      }
     }
     failure {
-      script {
-        try {
-          mail to: 'shubhamdwivedi.spacepilot@gmail.com',
-               subject: "Build #${BUILD_NUMBER} Failed",
-               body: "Check console output at ${BUILD_URL}"
-        } catch (Exception e) {
-          echo "Mail notification failed: ${e.getMessage()}"
+      node('any') {
+        script {
+          try {
+            mail to: 'shubhamdwivedi.spacepilot@gmail.com',
+                 subject: "❌ Build #${BUILD_NUMBER} FAILED - ${JOB_NAME}",
+                 body: """
+Hi Shubham,
+
+Your CI/CD Pipeline failed! ❌
+
+📋 Build Details:
+• Job: ${JOB_NAME}  
+• Build Number: ${BUILD_NUMBER}
+• Build URL: ${BUILD_URL}
+• Console Output: ${BUILD_URL}console
+
+🔧 Action Required:
+• Check the console output for error details
+• Fix the issues and trigger a new build
+• Contact DevOps team if you need assistance
+
+Thanks,
+Jenkins CI/CD Bot
+                 """
+          } catch (Exception e) {
+            echo "📧 Mail notification failed: ${e.getMessage()}"
+          }
+        }
+      }
+    }
+    unstable {
+      node('any') {
+        script {
+          echo "⚠️ Pipeline completed with warnings"
+          try {
+            mail to: 'shubhamdwivedi.spacepilot@gmail.com',
+                 subject: "⚠️ Build #${BUILD_NUMBER} UNSTABLE - ${JOB_NAME}",
+                 body: """
+Hi Shubham,
+
+Your CI/CD Pipeline completed but with warnings! ⚠️
+
+📋 Build Details:
+• Job: ${JOB_NAME}
+• Build Number: ${BUILD_NUMBER}  
+• Build URL: ${BUILD_URL}
+
+🔍 Action Recommended:
+• Review the console output for warnings
+• Consider fixing non-critical issues
+• Monitor the deployment
+
+Thanks,
+Jenkins CI/CD Bot
+                 """
+          } catch (Exception e) {
+            echo "📧 Mail notification failed: ${e.getMessage()}"
+          }
         }
       }
     }
