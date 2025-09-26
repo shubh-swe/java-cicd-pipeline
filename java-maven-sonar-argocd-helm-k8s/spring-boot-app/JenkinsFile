@@ -96,20 +96,16 @@ pipeline {
 
   post {
     always {
-      node {
-        cleanWs()
-      }
+      cleanWs()
     }
     failure {
-      node {
-        script {
-          try {
-            mail to: 'shubhamdwivedi.spacepilot@gmail.com',
-                 subject: "Build #${BUILD_NUMBER} Failed",
-                 body: "Check console output at ${BUILD_URL}"
-          } catch (Exception e) {
-            echo "Mail notification failed: ${e.getMessage()}"
-          }
+      script {
+        try {
+          mail to: 'shubhamdwivedi.spacepilot@gmail.com',
+               subject: "Build #${BUILD_NUMBER} Failed",
+               body: "Check console output at ${BUILD_URL}"
+        } catch (Exception e) {
+          echo "Mail notification failed: ${e.getMessage()}"
         }
       }
     }
