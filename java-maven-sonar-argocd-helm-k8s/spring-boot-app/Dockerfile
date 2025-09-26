@@ -1,5 +1,4 @@
-FROM eclipse-temurin:17-jre-alpine
-
+FROM eclipse-temurin:11-jre-alpine   
 WORKDIR /opt/app
 
 ARG artifact=target/spring-boot-web.jar
